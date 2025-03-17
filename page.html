@@ -2,110 +2,108 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LanaCoin Wallet</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            height: 100vh;
-            background-color: #f4f4f4;
-            margin: 0;
-        }
-        .wallet-container {
-            background: white;
-            padding: 20px;
-            border-radius: 10px;
-            box-shadow: 0px 0px 10px rgba(0, 0, 0, 0.1);
-            width: 360px;
-            text-align: center;
-        }
-        h2 {
-            margin-bottom: 20px;
-            color: #333;
-        }
-        input {
-            width: 90%;
-            padding: 10px;
-            margin: 10px 0;
-            border: 1px solid #ccc;
-            border-radius: 5px;
-        }
-        button {
-            background: green;
-            color: white;
-            padding: 10px;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-            width: 100%;
-        }
-        button:hover {
-            background: darkgreen;
-        }
-        .status {
-            margin-top: 10px;
-            color: red;
-            font-size: 14px;
-        }
-    </style>
-</head>
-<body>
-
-    <div class="wallet-container">
-        <h2>LanaCoin Wallet</h2>
-        <input type="text" id="privateKey" placeholder="Enter WIF private key">
-        <input type="text" id="recipientAddress" placeholder="Enter recipient address">
-        <input type="number" id="amount" placeholder="Amount (Satoshis)">
-        <button onclick="sendTransaction()">Send Transaction</button>
-        <p class="status" id="status"></p>
-    </div>
-
-    <!-- Load BitcoinJS and other required libraries -->
-   <script src="https://unpkg.com/bitcoinjs-lib@6.1.4"></script>
-<script src="https://unpkg.com/bitcoinjs-message@2.0.0"></script>
-<script src="https://unpkg.com/wif@2.0.6"></script>
-
-
+    <title>LanaCoin Wallet - Sign & Broadcast</title>
     <script>
-        // Ensure libraries are loaded
-        console.log("BitcoinJS Loaded:", typeof bitcoinjs !== "undefined");
-        console.log("BitcoinJS Message Loaded:", typeof bitcoinjsMessage !== "undefined");
-        console.log("WIF Loaded:", typeof wif !== "undefined");
+        function hexToBytes(hex) {
+            let bytes = [];
+            for (let i = 0; i < hex.length; i += 2) {
+                bytes.push(parseInt(hex.substr(i, 2), 16));
+            }
+            return bytes;
+        }
 
-        function sendTransaction() {
-            const statusElement = document.getElementById("status");
-            statusElement.style.color = "red";
+        function base58Decode(string) {
+            const alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+            let num = BigInt(0);
+            for (let char of string) {
+                num = num * BigInt(58) + BigInt(alphabet.indexOf(char));
+            }
+            let hex = num.toString(16);
+            if (hex.length % 2 !== 0) hex = "0" + hex;
+            return hex;
+        }
 
-            const privateKeyWIF = document.getElementById("privateKey").value.trim();
-            const recipientAddress = document.getElementById("recipientAddress").value.trim();
-            const amount = document.getElementById("amount").value.trim();
+        function sha256(hex) {
+            let buffer = new TextEncoder().encode(hex);
+            return crypto.subtle.digest("SHA-256", buffer).then(hashBuffer => {
+                return Array.from(new Uint8Array(hashBuffer), b => b.toString(16).padStart(2, '0')).join('');
+            });
+        }
 
-            if (!privateKeyWIF || !recipientAddress || !amount) {
-                statusElement.textContent = "Error: All fields are required!";
+        async function signTransaction() {
+            let wifKey = document.getElementById("privateKey").value;
+            let recipient = document.getElementById("recipient").value;
+            let amount = document.getElementById("amount").value;
+
+            if (!wifKey || !recipient || !amount) {
+                alert("Please enter all fields.");
                 return;
             }
 
-            try {
-                // Decode WIF Private Key
-                const keyPair = bitcoinjs.ECPair.fromWIF(privateKeyWIF, bitcoinjs.networks.bitcoin);
-                const { address } = bitcoinjs.payments.p2pkh({ pubkey: keyPair.publicKey });
+            // Decode WIF Private Key (Base58)
+            let privateKeyHex = base58Decode(wifKey).slice(2, 66); // Remove version & checksum
 
-                // Placeholder: Build & sign transaction
-                console.log(`Sender Address: ${address}`);
-                console.log(`Recipient Address: ${recipientAddress}`);
-                console.log(`Amount to Send: ${amount} Satoshis`);
+            // Construct a simple raw transaction (Inputs & Outputs need to be adapted)
+            let rawTx = "01000000" +  // Version
+                        "01" +         // Input count
+                        "previous_tx_id_here" + "00000000" + // Previous UTXO
+                        "76a914" + "your_public_key_hash_here" + "88ac" + // ScriptSig
+                        "ffffffff" + // Sequence
+                        "01" + // Output count
+                        "amount_in_satoshis_hex" + 
+                        "76a914" + recipient + "88ac" + // Output script (P2PKH)
+                        "00000000"; // Locktime
 
-                statusElement.style.color = "green";
-                statusElement.textContent = "Transaction Signed! (Not yet broadcasted)";
-            } catch (error) {
-                statusElement.textContent = "Error: Invalid Private Key!";
-                console.error(error);
+            // Double SHA-256 for signing
+            let txHash = await sha256(await sha256(rawTx));
+            let signedTx = privateKeyHex + txHash; // Placeholder for actual signing
+
+            document.getElementById("signedTx").value = signedTx;
+        }
+
+        function broadcastTransaction() {
+            let signedTx = document.getElementById("signedTx").value;
+
+            if (!signedTx) {
+                alert("No signed transaction found.");
+                return;
             }
+
+            let electrumServer = "electrum://electrumx-server.com:50001"; // Replace with real ElectrumX server
+            let request = `{"id": 1, "method": "blockchain.transaction.broadcast", "params": ["${signedTx}"]}`;
+
+            fetch(electrumServer, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(request)
+            })
+            .then(response => response.json())
+            .then(data => {
+                alert("Transaction broadcasted! TXID: " + data.result);
+            })
+            .catch(error => {
+                alert("Broadcast failed: " + error);
+            });
         }
     </script>
+</head>
+<body>
+    <h2>LanaCoin Wallet - Sign & Broadcast</h2>
+    
+    <label>Private Key (WIF):</label>
+    <input type="text" id="privateKey" placeholder="Enter WIF private key"><br><br>
+    
+    <label>Recipient Address:</label>
+    <input type="text" id="recipient" placeholder="Enter recipient address"><br><br>
+    
+    <label>Amount (Satoshis):</label>
+    <input type="text" id="amount" placeholder="Enter amount"><br><br>
+    
+    <button onclick="signTransaction()">Sign Transaction</button><br><br>
 
+    <label>Signed Transaction:</label>
+    <textarea id="signedTx" rows="4" cols="50"></textarea><br><br>
+
+    <button onclick="broadcastTransaction()">Broadcast Transaction</button>
 </body>
 </html>
