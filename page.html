@@ -69,8 +69,8 @@
                 return;
             }
 
-            let electrumServer = "electrum://electrumx-server.com:50001"; // Replace with real ElectrumX server
-            let request = `{"id": 1, "method": "blockchain.transaction.broadcast", "params": ["${signedTx}"]}`;
+            let electrumServer = "https://electrum1.lanacoin.com:5097"; // ElectrumX server
+            let request = { "id": 1, "method": "blockchain.transaction.broadcast", "params": [signedTx] };
 
             fetch(electrumServer, {
                 method: "POST",
