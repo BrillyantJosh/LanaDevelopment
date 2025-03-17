@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LanaCoin Wallet</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            text-align: center;
+        }
+        input {
+            width: 80%;
+            padding: 10px;
+            margin: 10px 0;
+            font-size: 16px;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 18px;
+            cursor: pointer;
+            background-color: #28a745;
+            color: white;
+            border: none;
+            border-radius: 5px;
+        }
+        button:hover {
+            background-color: #218838;
+        }
+        .container {
+            width: 400px;
+            margin: auto;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 10px;
+            box-shadow: 2px 2px 10px rgba(0,0,0,0.1);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>LanaCoin Wallet</h2>
+        <label>Private Key (WIF):</label>
+        <input type="text" id="wif" placeholder="Enter WIF private key"><br>
+
+        <label>Recipient Address:</label>
+        <input type="text" id="recipient" placeholder="Enter recipient address"><br>
+
+        <label>Amount (Satoshis):</label>
+        <input type="number" id="amount" placeholder="Amount in satoshis"><br>
+
+        <button id="sendButton">Send Transaction</button>
+    </div>
+
+    <!-- ✅ Correctly Loading Required Libraries -->
+  <script src="https://cdn.jsdelivr.net/npm/bitcoinjs-lib@6.1.4"></script>
+<script src="https://cdn.jsdelivr.net/npm/bitcoinjs-message@2.0.0"></script>
+<script src="https://cdn.jsdelivr.net/npm/wif@2.0.6"></script>
+
+
+    <script>
+        console.log("BitcoinJS Loaded:", typeof bitcoinjs !== "undefined");
+
+        // Ensure the button click event is registered properly
+        document.addEventListener("DOMContentLoaded", function() {
+            document.getElementById("sendButton").addEventListener("click", signAndBroadcast);
+        });
+
+        const electrumServer = "electrum1.lanacoin.com";
+        const electrumPort = 5097;
+
+        async function fetchUTXOs(address) {
+            const request = {
+                jsonrpc: "2.0",
+                method: "blockchain.address.listunspent",
+                params: [address],
+                id: 1
+            };
+
+            const response = await fetch(`http://${electrumServer}:${electrumPort}`, {
+                method: "POST",
+                body: JSON.stringify(request),
+                headers: { "Content-Type": "application/json" }
+            });
+
+            const data = await response.json();
+            return data.result;
+        }
+
+        async function signAndBroadcast() {
+            const wifKey = document.getElementById("wif").value.trim();
+            const recipient = document.getElementById("recipient").value.trim();
+            const amount = parseInt(document.getElementById("amount").value); // In Satoshis
+
+            if (!wifKey || !recipient || isNaN(amount) || amount <= 0) {
+                alert("Please enter all fields correctly.");
+                return;
+            }
+
+            try {
+                // Decode WIF private key
+                const keyPair = bitcoinjs.ECPair.fromWIF(wifKey, bitcoinjs.networks.bitcoin);
+                const { address } = bitcoinjs.payments.p2pkh({ pubkey: keyPair.publicKey });
+
+                // Fetch UTXOs
+                const utxos = await fetchUTXOs(address);
+                if (!utxos || utxos.length === 0) throw new Error("No UTXOs found!");
+
+                const psbt = new bitcoinjs.Psbt({ network: bitcoinjs.networks.bitcoin });
+
+                let totalInput = 0;
+                utxos.forEach(utxo => {
+                    psbt.addInput({
+                        hash: utxo.tx_hash,
+                        index: utxo.tx_pos,
+                        nonWitnessUtxo: Buffer.from(utxo.tx_hash, "hex")
+                    });
+                    totalInput += utxo.value;
+                });
+
+                const fee = 1000; // Approximate fee
+                const change = totalInput - amount - fee;
+
+                // Add recipient output
+                psbt.addOutput({ address: recipient, value: amount });
+
+                // Add change output (if any)
+                if (change > 0) {
+                    psbt.addOutput({ address: address, value: change });
+                }
+
+                // Sign all inputs
+                psbt.signAllInputs(keyPair);
+                psbt.finalizeAllInputs();
+
+                const rawTx = psbt.extractTransaction().toHex();
+                console.log("Signed Transaction:", rawTx);
+
+                // Broadcast Transaction
+                await broadcastTransaction(rawTx);
+            } catch (error) {
+                alert("Error: " + error.message);
+                console.error(error);
+            }
+        }
+
+        async function broadcastTransaction(rawTx) {
+            const request = {
+                jsonrpc: "2.0",
+                method: "blockchain.transaction.broadcast",
+                params: [rawTx],
+                id: 1
+            };
+
+            const response = await fetch(`http://${electrumServer}:${electrumPort}`, {
+                method: "POST",
+                body: JSON.stringify(request),
+                headers: { "Content-Type": "application/json" }
+            });
+
+            const data = await response.json();
+            if (data.result) {
+                alert("Transaction Broadcasted! TXID: " + data.result);
+            } else {
+                alert("Broadcast Failed: " + data.error.message);
+            }
+        }
+    </script>
+</body>
+</html>
